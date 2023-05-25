@@ -2,7 +2,7 @@
 
 This repo contains two solutions to show the onion skin.
 
- - `OnionSkinWindow` registers a function `OnGUISceneView` with `SceneView.datingSceneGui` immediately after import.
+ - `OnionSkinWindow` registers a function `OnGUISceneView` with `SceneView.duringSceneGui` immediately after import.
 
    This function sets the selected object's to each frame in the range by setting it on each refresh. The screen is then intercepted. When finished, all frames intercepted are blended according to transparency and output to the screen.
  - `OnionSkinPreviewWindow` and `AnimationOnionStage` defines a new `AnimationOnionStage` to display the onion skin effect.
