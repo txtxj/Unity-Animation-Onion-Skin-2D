@@ -1,8 +1,6 @@
-using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using Unity.VisualScripting;
+using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 
@@ -16,34 +14,14 @@ namespace Utils.Citrine.AnimationOnionSkin
         private static float _alpha = 0.8f;
         private static int _step = 1;
         private static int _maxStep = 1;
-        private static bool _alwaysRepaint = false;
+        private static bool _alwaysRepaint = true;
 
         private static AnimationWindow _window = null;
         private static GameObject _activeObject = null;
         private static int _frame = 0;
-        private static int _keyframe = 0;
         private static AnimationClip _clip = null;
-        private static ObjectReferenceKeyframe[] _spriteKeyframes = null;
 
         private static readonly List<RenderTexture> RenderTextures = new();
-
-        private static ObjectReferenceKeyframe[] SpriteKeyframes
-        {
-            get
-            {
-                if (_spriteKeyframes is null && Clip != null)
-                {
-                    EditorCurveBinding[] bindings = AnimationUtility.GetObjectReferenceCurveBindings(Clip).Where(x => x.propertyName.Contains("Sprite")).ToArray();
-                    if (bindings.Length >= 1)
-                    {
-                        _spriteKeyframes = AnimationUtility.GetObjectReferenceCurve(Clip, bindings[0]);
-                    }
-                }
-
-                return _spriteKeyframes;
-            }
-            set => _spriteKeyframes = value;
-        }
 
         private static bool DirtyFlag
         {
@@ -108,47 +86,13 @@ namespace Utils.Citrine.AnimationOnionSkin
             }
         }
 
-        private static int Keyframe
-        {
-            get
-            {
-                if (SpriteKeyframes is { Length: < 1 } || Clip == null)
-                {
-                    return _keyframe = 0;
-                }
-
-                if (Mathf.RoundToInt(SpriteKeyframes[_keyframe].time * Clip.frameRate) <= Frame &&
-                    ((_keyframe + 1 < SpriteKeyframes.Length && Mathf.RoundToInt(SpriteKeyframes[_keyframe + 1].time * Clip.frameRate) > Frame) ||
-                     (_keyframe + 1 >= SpriteKeyframes.Length && Mathf.RoundToInt(Clip.length * Clip.frameRate) > Frame)))
-                {
-                    return _keyframe;
-                }
-
-                for (_keyframe = 0; _keyframe < SpriteKeyframes.Length; _keyframe++)
-                {
-                    if (Mathf.RoundToInt(SpriteKeyframes[_keyframe].time * Clip.frameRate) <= Frame &&
-                        ((_keyframe + 1 < SpriteKeyframes.Length && Mathf.RoundToInt(SpriteKeyframes[_keyframe + 1].time * Clip.frameRate) > Frame) ||
-                         (_keyframe + 1 >= SpriteKeyframes.Length && Mathf.RoundToInt(Clip.length * Clip.frameRate) >= Frame)))
-                    {
-                        return _keyframe;
-                    }
-                }
-
-                return _keyframe = 0;
-            }
-        }
-
         private static AnimationClip Clip
         {
             get => _clip;
             set
             {
-                if (_clip != value)
-                {
-                    DirtyFlag = true;
-                }
-
-                SpriteKeyframes = null;
+                DirtyFlag |= _clip != value;
+                DirtyFlag &= value != null;
                 _clip = value;
             }
         }
@@ -171,7 +115,7 @@ namespace Utils.Citrine.AnimationOnionSkin
             Alpha = EditorGUILayout.Slider("Alpha 衰减系数", Alpha, 0.1f, 0.9f);
             _maxStep = Mathf.FloorToInt(1f / _alpha);
             Step = EditorGUILayout.IntSlider("最大显示步数", Step, 1, _maxStep);
-            _alwaysRepaint = EditorGUILayout.Toggle("是否总是重绘（可能卡顿）", _alwaysRepaint);
+            _alwaysRepaint = EditorGUILayout.Toggle("是否总是重绘", _alwaysRepaint);
         }
 
         private static void RefreshProperties()
@@ -221,18 +165,46 @@ namespace Utils.Citrine.AnimationOnionSkin
 
             Handles.EndGUI();
         }
-
-        private static void LoadSpriteWithKeyframeOffset(int offset)
+        
+        private static int CalculateKeyframe(ObjectReferenceKeyframe[] keyframes)
         {
-            if (SpriteKeyframes == null || SpriteKeyframes.Length < 1)
+            if (keyframes is { Length: < 1 })
             {
-                return;
+                return 0;
             }
 
-            if (SpriteKeyframes[(Keyframe + offset + SpriteKeyframes.Length) % SpriteKeyframes.Length].value is Sprite sprite &&
-                ActiveObject is { } obj)
+            for (int index = 0; index < keyframes.Length; index++)
             {
-                obj.GetComponent<SpriteRenderer>().sprite = sprite;
+                if (Mathf.RoundToInt(keyframes[index].time * Clip.frameRate) <= Frame &&
+                    ((index + 1 < keyframes.Length && Mathf.RoundToInt(keyframes[index + 1].time * Clip.frameRate) > Frame) ||
+                     (index + 1 >= keyframes.Length && Mathf.RoundToInt(Clip.length * Clip.frameRate) >= Frame)))
+                {
+                    return index;
+                }
+            }
+
+            return 0;
+        }
+
+        private static void SetOffsetToGameObject(int offset)
+        {
+            EditorCurveBinding[] bindings = AnimationUtility.GetObjectReferenceCurveBindings(Clip);
+            foreach (EditorCurveBinding binding in bindings)
+            {
+                ObjectReferenceKeyframe[] frames = AnimationUtility.GetObjectReferenceCurve(Clip, binding);
+                int keyframe = CalculateKeyframe(frames) + offset;
+                Object value = frames[(keyframe + frames.Length * Mathf.Abs(offset)) % frames.Length].value;
+                Debug.Log(binding.path);
+                GameObject target = binding.path.Length < 1 ? ActiveObject : ActiveObject.transform.Find(binding.path)?.gameObject;
+                if (target != null)
+                {
+                    Component component = target.GetComponent(binding.type);
+                    PropertyInfo item = binding.type.GetProperty(binding.propertyName[2..].ToLower());
+                    if (item != null)
+                    {
+                        item.SetValue(component, value);
+                    }
+                }
             }
         }
 
@@ -251,7 +223,7 @@ namespace Utils.Citrine.AnimationOnionSkin
             }
 
             RefreshProperties();
-            if (DirtyFlag && Window != null)
+            if (DirtyFlag && Window != null && Clip != null)
             {
                 DirtyFlag = false;
                 foreach (RenderTexture rt in RenderTextures)
@@ -264,28 +236,17 @@ namespace Utils.Citrine.AnimationOnionSkin
 
                 RenderTextures.Clear();
 
-                // 在 Preview 模式下，手动修改了 Sprite 后，无法直接从动画曲线中得到修改后的 Sprite
-                Sprite sprite = null;
-                if (ActiveObject != null)
-                {
-                    sprite = ActiveObject.GetComponent<SpriteRenderer>().sprite;
-                }
-
                 for (int i = -Step; i <= Step; i++)
                 {
                     if (i != 0)
                     {
-                        LoadSpriteWithKeyframeOffset(i);
+                        SetOffsetToGameObject(i);
                         RenderTextures.Add(Capture(sceneView.camera));
                     }
                 }
 
-                if (ActiveObject != null)
-                {
-                    ActiveObject.GetComponent<SpriteRenderer>().sprite = sprite;
-                }
-
                 Window.frame = Frame;
+                SetOffsetToGameObject(0);
             }
 
             int index = -Step;
