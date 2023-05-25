@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
@@ -9,7 +8,6 @@ namespace Utils.Citrine.AnimationOnionSkin
     [InitializeOnLoad]
     public class OnionSkinWindow : EditorWindow
     {
-        private static bool _enable = false;
         private static bool _dirtyFlag = true;
         private static float _alpha = 0.8f;
         private static int _step = 1;
@@ -22,6 +20,8 @@ namespace Utils.Citrine.AnimationOnionSkin
         private static AnimationClip _clip = null;
 
         private static readonly List<RenderTexture> RenderTextures = new();
+
+        internal static bool Enable { get; set; } = false;
 
         private static bool DirtyFlag
         {
@@ -102,25 +102,26 @@ namespace Utils.Citrine.AnimationOnionSkin
             SceneView.duringSceneGui += OnGUISceneView;
         }
 
-        [MenuItem("Animation Tools/OnionSkin")]
+        [MenuItem("Animation Tools/Onion Skin(In Scene)")]
         private static void InitWindow()
         {
-            OnionSkinWindow window = GetWindow<OnionSkinWindow>("动画洋葱皮效果设置");
+            OnionSkinWindow window = GetWindow<OnionSkinWindow>("Onion Skin Setting");
             window.Show();
         }
 
         private void OnGUI()
         {
-            _enable = EditorGUILayout.Toggle("启用", _enable);
-            Alpha = EditorGUILayout.Slider("Alpha 衰减系数", Alpha, 0.1f, 0.9f);
+            Enable = EditorGUILayout.Toggle("Enable", Enable);
+            Alpha = EditorGUILayout.Slider("Alpha Factor", Alpha, 0.1f, 0.9f);
             _maxStep = Mathf.FloorToInt(1f / _alpha);
-            Step = EditorGUILayout.IntSlider("最大显示步数", Step, 1, _maxStep);
-            _alwaysRepaint = EditorGUILayout.Toggle("是否总是重绘", _alwaysRepaint);
+            Step = EditorGUILayout.IntSlider("Keyframe Step", Step, 1, _maxStep);
+            _alwaysRepaint = EditorGUILayout.Toggle("Always Repaint", _alwaysRepaint);
         }
 
         private static void RefreshProperties()
         {
             Window = GetWindow<AnimationWindow>(false, null, false);
+            ActiveObject = Selection.activeObject as GameObject;
             if (Window != null)
             {
                 Frame = Window.frame;
@@ -131,8 +132,6 @@ namespace Utils.Citrine.AnimationOnionSkin
                 Frame = 0;
                 Clip = null;
             }
-
-            ActiveObject = Selection.activeObject as GameObject;
         }
 
         private static RenderTexture Capture(Camera camera)
@@ -210,7 +209,7 @@ namespace Utils.Citrine.AnimationOnionSkin
 
         private static void OnGUISceneView(SceneView sceneView)
         {
-            if (!_enable)
+            if (!Enable)
             {
                 DirtyFlag = true;
                 return;
@@ -223,7 +222,7 @@ namespace Utils.Citrine.AnimationOnionSkin
             }
 
             RefreshProperties();
-            if (DirtyFlag && Window != null && Clip != null)
+            if (DirtyFlag && Window != null && Window.hasFocus && Clip != null)
             {
                 DirtyFlag = false;
                 foreach (RenderTexture rt in RenderTextures)
@@ -249,16 +248,19 @@ namespace Utils.Citrine.AnimationOnionSkin
                 SetOffsetToGameObject(0);
             }
 
-            int index = -Step;
-            foreach (RenderTexture rt in RenderTextures)
+            if (Window != null && Window.hasFocus)
             {
-                if (index == 0)
+                int index = -Step;
+                foreach (RenderTexture rt in RenderTextures)
                 {
+                    if (index == 0)
+                    {
+                        index++;
+                    }
+
+                    DrawRenderTexture(rt, 1f - Mathf.Abs(index) * Alpha);
                     index++;
                 }
-
-                DrawRenderTexture(rt, 1f - Mathf.Abs(index) * Alpha);
-                index++;
             }
         }
     }
